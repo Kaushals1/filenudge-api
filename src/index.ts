@@ -30,7 +30,8 @@ app.get('/health', (c) => {
 app.use('/api/*', authMiddleware)
 app.get('/api/test', (c) => {
   const user = c.get('user')
-  return c.json({ message: `Hello ${user.name}`, user })
+  const workspaceId = c.get('workspace_id')
+  return c.json({ user, workspace_id: workspaceId })
 })
 
 const port = parseInt(process.env.PORT || '8000')

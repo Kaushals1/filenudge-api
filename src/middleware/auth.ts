@@ -1,8 +1,6 @@
 import { createMiddleware } from 'hono/factory'
 import { getCookie, deleteCookie } from 'hono/cookie'
-import { eq, and, gt } from 'drizzle-orm'
-import { db } from '../db/index.js'
-import { sessions, users } from '../db/schema.js'
+import { getUserFromSessionToken } from '../lib/auth-utils.js'
 
 export type AuthVariables = {
   user: {
@@ -10,7 +8,9 @@ export type AuthVariables = {
     name: string | null
     email: string
     avatar_url: string | null
+    role: string
   }
+  workspace_id: string
 }
 
 export const authMiddleware = createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
@@ -20,25 +20,14 @@ export const authMiddleware = createMiddleware<{ Variables: AuthVariables }>(asy
     return c.json({ error: 'Not authenticated' }, 401)
   }
 
-  const now = new Date()
+  const result = await getUserFromSessionToken(token)
 
-  const result = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      avatar_url: users.avatar_url,
-    })
-    .from(sessions)
-    .innerJoin(users, eq(sessions.user_id, users.id))
-    .where(and(eq(sessions.token, token), gt(sessions.expires_at, now)))
-    .limit(1)
-
-  if (result.length === 0) {
+  if (!result) {
     deleteCookie(c, 'session', { path: '/' })
     return c.json({ error: 'Not authenticated' }, 401)
   }
 
-  c.set('user', result[0])
+  c.set('user', result.user)
+  c.set('workspace_id', result.workspace.id)
   await next()
 })

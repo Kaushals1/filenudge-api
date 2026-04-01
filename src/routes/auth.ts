@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
-import { eq, and, gt } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { randomBytes } from 'crypto'
 import { db } from '../db/index.js'
-import { users, sessions } from '../db/schema.js'
+import { users, sessions, workspaces, workspace_members } from '../db/schema.js'
 import { getGoogleAuthURL, getGoogleTokens, getGoogleUser } from '../lib/google.js'
+import { getUserFromSessionToken } from '../lib/auth-utils.js'
 
 const authRoutes = new Hono()
 
@@ -57,6 +58,32 @@ authRoutes.get('/google/callback', async (c) => {
     })
     .returning()
 
+  // Check if user has a workspace
+  const existingMembership = await db
+    .select()
+    .from(workspace_members)
+    .where(eq(workspace_members.user_id, user.id))
+    .limit(1)
+
+  if (existingMembership.length === 0) {
+    const workspaceName = user.name
+      ? `${user.name}'s Workspace`
+      : `${user.email.split('@')[0]}'s Workspace`
+
+    await db.transaction(async (tx) => {
+      const [workspace] = await tx
+        .insert(workspaces)
+        .values({ name: workspaceName })
+        .returning()
+
+      await tx.insert(workspace_members).values({
+        workspace_id: workspace.id,
+        user_id: user.id,
+        role: 'owner',
+      })
+    })
+  }
+
   // Create session
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
@@ -100,26 +127,17 @@ authRoutes.get('/me', async (c) => {
     return c.json({ error: 'Not authenticated' }, 401)
   }
 
-  const now = new Date()
+  const result = await getUserFromSessionToken(token)
 
-  const result = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      avatar_url: users.avatar_url,
-    })
-    .from(sessions)
-    .innerJoin(users, eq(sessions.user_id, users.id))
-    .where(and(eq(sessions.token, token), gt(sessions.expires_at, now)))
-    .limit(1)
-
-  if (result.length === 0) {
+  if (!result) {
     deleteCookie(c, 'session', { path: '/' })
     return c.json({ error: 'Not authenticated' }, 401)
   }
 
-  return c.json({ user: result[0] })
+  return c.json({
+    user: result.user,
+    workspace: result.workspace,
+  })
 })
 
 export default authRoutes
