@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { serve } from '@hono/node-server'
 import authRoutes from './routes/auth.js'
+import clientRoutes from './routes/clients.js'
 import { authMiddleware, type AuthVariables } from './middleware/auth.js'
 
 const app = new Hono<{ Variables: AuthVariables }>()
@@ -28,6 +29,7 @@ app.get('/health', (c) => {
 })
 
 app.use('/api/*', authMiddleware)
+app.route('/api/clients', clientRoutes)
 app.get('/api/test', (c) => {
   const user = c.get('user')
   const workspaceId = c.get('workspace_id')
